@@ -56,6 +56,11 @@ function validateRequiredColumns(columnMap) {
 	for (const key of ['firstName', 'lastName', 'company']) {
 		if (!columnMap[key]) missing.push(key);
 	}
+
+	// At least one of these columns must exist.
+	if (!columnMap.website && !columnMap.activityContext) {
+		missing.push('websiteOrActivityContext');
+	}
 	return missing;
 }
 

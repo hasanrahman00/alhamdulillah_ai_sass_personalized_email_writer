@@ -120,28 +120,23 @@ function validateRows({ rows, columnMap }) {
 	const fnCol = columnMap.firstName;
 	const lnCol = columnMap.lastName;
 	const companyCol = columnMap.company;
-	const websiteCol = columnMap.website;
-	const activityCol = columnMap.activityContext;
+	// Website / Activity URL and Activity Context are optional per-row.
+	// The requirement is that at least one of these columns exists in the file.
 
 	for (let i = 0; i < rows.length; i++) {
 		const row = rows[i] || {};
 		const firstName = fnCol ? row[fnCol] : '';
 		const lastName = lnCol ? row[lnCol] : '';
 		const company = companyCol ? row[companyCol] : '';
-		const website = websiteCol ? row[websiteCol] : '';
-		const activity = activityCol ? row[activityCol] : '';
 
 		const missingRequired = [];
 		if (isBlank(firstName)) missingRequired.push('First Name');
 		if (isBlank(lastName)) missingRequired.push('Last Name');
 		if (isBlank(company)) missingRequired.push('Company');
-
-		const hasEither = !isBlank(website) || !isBlank(activity);
-		if (missingRequired.length || !hasEither) {
+		if (missingRequired.length) {
 			errors.push({
 				rowIndex: i + 2, // +1 header +1 1-based
 				missingRequired,
-				hasEither,
 			});
 			if (errors.length >= 5) break;
 		}
@@ -221,14 +216,22 @@ filesRouter.post(
 		const missing = validateRequiredColumns(columnMap);
 		if (missing.length) {
 			if (fs.existsSync(storedPath)) fs.unlinkSync(storedPath);
+
+			const pretty = {
+				firstName: 'First Name',
+				lastName: 'Last Name',
+				company: 'Company',
+				websiteOrActivityContext: 'Website / Activity URL or Activity Context',
+			};
+			const missingPretty = missing.map((k) => pretty[k] || k);
 			throw new HttpError(
 				400,
-				`Missing required columns: ${missing.join(', ')}. Expected headers like First Name, Last Name, Company.`,
+				`Missing required columns: ${missingPretty.join(', ')}. Required: First Name, Last Name, Company, and at least one of Website / Activity URL or Activity Context.`,
 				{ expose: true }
 			);
 		}
 
-		// Per-row validation for required values + either/or rule.
+		// Per-row validation for required values.
 		let rowsForValidation = previewRows;
 		if (totalRows > previewRows.length) {
 			// For CSV storedPath, stream and validate all rows (file sizes are expected to be small in this MVP).
@@ -251,9 +254,6 @@ filesRouter.post(
 			const details = [];
 			if (first.missingRequired && first.missingRequired.length) {
 				details.push(`missing required values: ${first.missingRequired.join(', ')}`);
-			}
-			if (!first.hasEither) {
-				details.push('must include either Website / Activity URL OR Activity Context');
 			}
 			throw new HttpError(
 				400,

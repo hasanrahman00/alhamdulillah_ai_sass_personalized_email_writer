@@ -202,7 +202,7 @@ jobsRouter.get(
 		}
 
 		const originalHeaders = JSON.parse(file.header_json);
-		const extraCols = ['subject', 'email_body'];
+		const extraCols = ['subject', 'opening_line', 'email_body', 'cta'];
 		const fields = Array.from(new Set([...originalHeaders, ...extraCols]));
 
 		const rows = [];
@@ -216,7 +216,9 @@ jobsRouter.get(
 					rows.push({
 						...row,
 						subject: out?.subject || '',
+						opening_line: out?.opening_line || '',
 						email_body: buildFullEmail(out),
+						cta: out?.cta || '',
 					});
 				})
 				.on('error', (err) => reject(err))
