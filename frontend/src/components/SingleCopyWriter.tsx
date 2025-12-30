@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
-import { Wand2, Copy, Check, AlertCircle, RefreshCw, Info, CheckCircle2 } from 'lucide-react';
+import { Wand2, Copy, Check, AlertCircle, RefreshCw } from 'lucide-react';
 type ToneType = 'Professional/Respectful/Formal' | 'Friendly & Conversational' | 'Casual' | 'Humorous/Playful/Funny' | 'Empathetic/Supportive/Sympathetic' | 'Casual-Respectful' | 'Concise/Direct' | 'Decisive/Authoritative' | 'Cheerful/Enthusiastic/Joyful' | 'Encouraging/Inspiring' | 'Persuasive' | 'Informative' | 'Warm & Welcoming' | 'Optimistic' | 'Authoritative' | 'Conversational' | 'Urgent';
 type ToneSelection = ToneType | '';
 type LengthType = 'Short (50–75 words)' | 'Medium (75–125 words)' | 'Long (>125 words)' | 'Custom';
@@ -103,60 +103,6 @@ export function SingleCopyWriter() {
   const [copied, setCopied] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
   const [generateError, setGenerateError] = useState('');
-
-  const getToneTint = (toneName: ToneType) => {
-    const n = String(toneName || '').toLowerCase();
-
-    // Use only existing theme tokens; keep these very light.
-    if (/(urgent)/.test(n)) {
-      return {
-        bg: 'bg-accent-orange/5',
-        border: 'border-accent-orange/20',
-        accent: 'bg-accent-orange/50',
-        iconBg: 'bg-accent-orange/10',
-        iconText: 'text-accent-orange'
-      };
-    }
-
-    if (/(humorous|playful|funny)/.test(n)) {
-      return {
-        bg: 'bg-gentle-orange-light/25',
-        border: 'border-accent-orange/15',
-        accent: 'bg-gentle-orange/60',
-        iconBg: 'bg-gentle-orange/10',
-        iconText: 'text-gentle-orange'
-      };
-    }
-
-    if (/(friendly|conversational|warm|cheerful|enthusiastic|joyful|encouraging|inspiring|optimistic|empathetic|supportive|sympathetic)/.test(n)) {
-      return {
-        bg: 'bg-success-green/5',
-        border: 'border-success-green/20',
-        accent: 'bg-success-green/60',
-        iconBg: 'bg-success-green/10',
-        iconText: 'text-success-green'
-      };
-    }
-
-    if (/(professional|formal|authoritative|decisive|informative|persuasive|direct)/.test(n)) {
-      return {
-        bg: 'bg-soft-blue/5',
-        border: 'border-soft-blue/20',
-        accent: 'bg-soft-blue/60',
-        iconBg: 'bg-soft-blue/10',
-        iconText: 'text-soft-blue-dark'
-      };
-    }
-
-    return {
-      bg: 'bg-warm-cream/40',
-      border: 'border-warm-gray/10',
-      accent: 'bg-warm-gray/30',
-      iconBg: 'bg-warm-gray/5',
-      iconText: 'text-warm-gray-light'
-    };
-  };
-
   const getToneBestFor = (toneName: ToneType) => {
     const bestFor: Record<ToneType, string> = {
       'Professional/Respectful/Formal': 'Best for: formal intros, proposals, enterprise.',
@@ -359,6 +305,8 @@ export function SingleCopyWriter() {
       setGenerateError('');
     }
   };
+  const selectedTone = formData.tone ? TONE_GUIDE.find(t => t.name === formData.tone) : undefined;
+  const selectedToneBestFor = formData.tone ? getToneBestFor(formData.tone as ToneType) : '';
   return <div className="space-y-8">
       <div className="bg-white/70 border border-warm-gray/10 rounded-2xl px-6 py-5">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -380,9 +328,9 @@ export function SingleCopyWriter() {
         </div>
       </div>
       {/* Top Section: Form */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 gap-6">
         {/* Copy Details Form */}
-        <div className="lg:col-span-8">
+        <div>
           <Card title="Email Inputs (for personalization)" className="border-t-4 border-t-soft-blue">
             <div className="space-y-6">
               {/* Recipient Info */}
@@ -442,6 +390,34 @@ export function SingleCopyWriter() {
                   <p className="text-sm text-warm-gray-light leading-relaxed">
                     <span className="font-semibold text-accent-orange">🎯 Include:</span> service + who it’s for + outcome (+ 1 proof point).
                   </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="tone" className="text-sm font-semibold text-deep-navy">
+                    Select Tone <span className="text-red-500">*</span>
+                  </label>
+                  <select id="tone" name="tone" value={formData.tone} onChange={handleInputChange} className={`w-full p-2.5 rounded-lg border bg-white/70 focus:bg-white focus:ring-2 focus:ring-soft-blue focus:border-transparent transition-all text-deep-navy ${showErrors && !validation.tone ? 'border-red-300 focus:ring-red-200' : 'border-warm-gray/20'}`}>
+                    <option value="">Choose a tone…</option>
+                    {TONE_GUIDE.map(tone => <option key={tone.name} value={tone.name}>
+                        {tone.name} — {tone.description}
+                      </option>)}
+                  </select>
+                  {showErrors && !validation.tone && <p className="text-sm text-red-600">Please select a tone.</p>}
+
+                  <p className="text-sm text-warm-gray-light leading-relaxed">
+                    <span className="font-semibold text-accent-orange">🎛️ Tip:</span> Start with “Friendly & Conversational”; use “Urgent” only for real deadlines.
+                  </p>
+
+                  {selectedTone && <div className="p-3 rounded-xl bg-white/70 border border-warm-gray/10">
+                      <p className="text-sm text-warm-gray-light leading-relaxed">
+                        <span className="text-xs font-semibold text-deep-navy bg-white border border-warm-gray/10 rounded-full px-2 py-0.5">
+                          {selectedToneBestFor}
+                        </span>
+                      </p>
+                      <p className="text-sm text-warm-gray-light leading-relaxed mt-2">
+                        {selectedTone.description}
+                      </p>
+                    </div>}
                 </div>
               </div>
 
@@ -586,86 +562,6 @@ export function SingleCopyWriter() {
               </div>
             </div>
           </Card>
-        </div>
-
-        {/* Tone Selection Sidebar */}
-        <div className="lg:col-span-4">
-          <div className="sticky top-6">
-            <Card title="🎛️ Select Tone" description="Choose a tone that matches your brand and your audience." >
-              <div className="space-y-3 mt-1">
-                <div className="p-3 rounded-xl bg-soft-blue/5 border border-soft-blue/10">
-                  <p className="text-sm font-semibold text-deep-navy">✅ Required</p>
-                  <p className="text-sm text-warm-gray-light mt-1 leading-relaxed">Read tone styles and click Select to apply.</p>
-                </div>
-
-                <div className="p-3 rounded-xl bg-white/70 border border-warm-gray/10">
-                  <p className="text-sm text-warm-gray-light leading-relaxed">
-                    <span className="font-semibold text-accent-orange">🎛️ Tip:</span> Start with “Friendly & Conversational”; use “Urgent” only for real deadlines.
-                  </p>
-                </div>
-
-                <div className={`p-3 rounded-xl border ${showErrors && !validation.tone ? 'bg-red-50 border-red-100' : 'bg-white/70 border-warm-gray/10'}`}>
-                  <div className="flex items-center justify-between">
-                    <div className={`text-sm ${showErrors && !validation.tone ? 'text-red-600' : 'text-deep-navy'}`}>
-                      <span className="font-semibold">🎯 Current tone:</span>{' '}
-                      <span className={`font-semibold ${showErrors && !validation.tone ? 'text-red-600' : 'text-deep-navy'}`}>
-                        {formData.tone ? formData.tone : 'Not selected'}
-                      </span>
-                    </div>
-                  </div>
-                  {showErrors && !validation.tone && <p className="text-sm text-red-600 mt-2">Please select a tone.</p>}
-                </div>
-              </div>
-
-              <div className="max-h-[640px] overflow-y-auto pr-1 space-y-3">
-                {TONE_GUIDE.map(tone => {
-                const isSelected = tone.name === formData.tone;
-                const tint = getToneTint(tone.name);
-                const bestFor = getToneBestFor(tone.name);
-
-                return <div key={tone.name} className={`relative overflow-hidden p-4 rounded-xl border transition-all ${isSelected ? 'shadow-sm' : ''} ${isSelected ? `bg-white border-soft-blue/35` : `bg-white/70 hover:bg-white`} ${isSelected ? '' : tint.border} ${isSelected ? '' : ''}`}>
-                    <div className={`absolute inset-y-0 left-0 w-1 ${isSelected ? 'bg-soft-blue/70' : tint.accent}`} />
-                    <div className={`absolute inset-0 ${isSelected ? 'bg-soft-blue/5' : tint.bg}`} />
-                    <div className="relative">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-success-green/15' : tint.iconBg}`}>
-                          {isSelected ? <CheckCircle2 className="w-4 h-4 text-success-green" /> : <Info className={`w-4 h-4 ${tint.iconText}`} />}
-                        </div>
-                        <h5 className="font-semibold text-deep-navy text-sm truncate">
-                          {tone.name}
-                        </h5>
-                      </div>
-
-                      <div className="flex-shrink-0">
-                        <Button size="sm" variant={isSelected ? 'secondary' : 'outline'} className={isSelected ? 'bg-accent-orange hover:bg-accent-orange/90 text-white disabled:opacity-100 disabled:cursor-default' : 'border-accent-orange text-accent-orange hover:bg-accent-orange/10'} disabled={isSelected} onClick={() => {
-                          setFormData(prev => ({
-                            ...prev,
-                            tone: tone.name
-                          }));
-                        }}>
-                          {isSelected ? 'Selected ✓' : 'Select'}
-                        </Button>
-                      </div>
-                    </div>
-
-                    <p className="w-full text-sm text-warm-gray-light leading-relaxed mt-2">
-                      <span className="inline-flex items-center gap-2">
-                        <span className="text-xs font-semibold text-deep-navy bg-white/70 border border-warm-gray/10 rounded-full px-2 py-0.5">
-                          {bestFor}
-                        </span>
-                      </span>
-                    </p>
-
-                    <p className="w-full text-sm text-warm-gray-light leading-relaxed mt-2">
-                      {tone.description}
-                    </p>
-                    </div>
-                  </div>;
-              })}
-              </div>
-            </Card>
-          </div>
         </div>
       </div>
 

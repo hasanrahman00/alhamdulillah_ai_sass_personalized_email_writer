@@ -27,10 +27,19 @@ function extractJsonObject(text) {
 	return JSON.parse(candidate);
 }
 
+function assertDeepSeekConfigured() {
+	if (config.deepSeek.apiKey) return;
+	throw new HttpError(500, 'DeepSeek API key is not configured', {
+		expose: true,
+		details: {
+			requiredEnvVars: ['DEEPSEEK_API_KEY', 'DEEPSEEK_KEY', 'DEEPSEEK_TOKEN'],
+			envFileHint: 'Create backend/.env (you can copy backend/.env.example) and restart the backend',
+		},
+	});
+}
+
 async function callDeepSeek({ prompt, requestId }) {
-	if (!config.deepSeek.apiKey) {
-		throw new HttpError(500, 'DeepSeek API key is not configured', { expose: true });
-	}
+	assertDeepSeekConfigured();
 
 	const payload = {
 		model: config.deepSeek.model,
@@ -103,9 +112,7 @@ async function callDeepSeek({ prompt, requestId }) {
 }
 
 async function callDeepSeekText({ prompt, requestId }) {
-	if (!config.deepSeek.apiKey) {
-		throw new HttpError(500, 'DeepSeek API key is not configured', { expose: true });
-	}
+	assertDeepSeekConfigured();
 
 	const payload = {
 		model: config.deepSeek.model,

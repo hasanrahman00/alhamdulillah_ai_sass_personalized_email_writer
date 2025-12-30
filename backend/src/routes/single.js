@@ -7,6 +7,7 @@ const { COLD_EMAIL_PROMPT_WITH_FOLLOW_UP_TEMPLATE } = require('../ai/prompt');
 const { getToneGuidance } = require('../ai/toneGuide');
 const { scrapeUrlRaw } = require('../scrape/scrapeUrlRaw');
 const { callDeepSeekText } = require('../ai/deepseek');
+const { normalizeWebsiteInput } = require('../util/website');
 
 const singleRouter = express.Router();
 
@@ -156,6 +157,15 @@ function isHttpUrl(value) {
 	}
 }
 
+function looksLikeSingleUrl(value) {
+	const s = String(value || '').trim();
+	if (!s) return false;
+	// If it contains whitespace/newlines, treat it as pasted context.
+	if (/\s/.test(s)) return false;
+	// Quick heuristic: domains/urls usually contain a dot.
+	return s.includes('.');
+}
+
 singleRouter.post(
 	'/generate',
 	asyncHandler(async (req, res) => {
@@ -199,8 +209,19 @@ singleRouter.post(
 		const rawFromTextField = String(data.activityText || '').trim();
 		const rawFromUrlField = String(data.companyUrl || '').trim();
 
-		const urlToScrape = isHttpUrl(rawFromUrlField) ? rawFromUrlField : '';
-		const pastedContextFromUrlField = urlToScrape ? '' : rawFromUrlField;
+		let urlToScrape = '';
+		let pastedContextFromUrlField = '';
+		if (!isBlank(rawFromUrlField) && looksLikeSingleUrl(rawFromUrlField)) {
+			if (isHttpUrl(rawFromUrlField)) {
+				urlToScrape = rawFromUrlField;
+			} else {
+				const normalized = normalizeWebsiteInput(rawFromUrlField);
+				urlToScrape = normalized.ok && normalized.homepageUrl ? normalized.homepageUrl : '';
+			}
+		}
+		if (isBlank(urlToScrape)) {
+			pastedContextFromUrlField = rawFromUrlField;
+		}
 
 		if (isBlank(rawFromTextField) && isBlank(pastedContextFromUrlField) && isBlank(urlToScrape)) {
 			throw new HttpError(400, 'Please add activity context (URL or pasted text).', { expose: true });

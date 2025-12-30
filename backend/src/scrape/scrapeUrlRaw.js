@@ -103,6 +103,10 @@ function cap(text, maxChars) {
 	return t.slice(0, maxChars) + '…';
 }
 
+function capForLog(text) {
+	return cap(text, Math.max(200, Number(config.logActivityContextMaxChars) || 2000));
+}
+
 async function extractFromPage(page) {
 	const title = await page.title().catch(() => '');
 	const metaDescription = await page
@@ -206,6 +210,17 @@ async function scrapeUrlRaw(userProvidedUrl) {
 			});
 		}
 
+			if (config.logActivityContext) {
+				// eslint-disable-next-line no-console
+				console.log(
+					[
+						'\n================ SCRAPED ACTIVITY CONTEXT (URL) ================',
+						`URL: ${url}`,
+						capForLog(combined),
+						'================ END SCRAPED ACTIVITY CONTEXT =================\n',
+					].join('\n')
+				);
+			}
 			return combined;
 		} catch (err) {
 			if (err instanceof HttpError) throw err;

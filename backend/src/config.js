@@ -13,6 +13,12 @@ function numberEnv(name, fallback) {
 	return Number.isFinite(num) ? num : fallback;
 }
 
+function boolEnv(name, fallback = false) {
+	const raw = String(process.env[name] ?? '').trim().toLowerCase();
+	if (!raw) return fallback;
+	return ['1', 'true', 'yes', 'y', 'on'].includes(raw);
+}
+
 const config = {
 	port: numberEnv('PORT', 3001),
 	corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
@@ -24,8 +30,10 @@ const config = {
 	scrapeTimeoutMs: numberEnv('SCRAPE_TIMEOUT_MS', 30000),
 	aiTimeoutMs: numberEnv('AI_TIMEOUT_MS', 45000),
 	maxScrapedChars: numberEnv('MAX_SCRAPED_CHARS', 6000),
+	logActivityContext: boolEnv('LOG_ACTIVITY_CONTEXT', false),
+	logActivityContextMaxChars: numberEnv('LOG_ACTIVITY_CONTEXT_MAX_CHARS', 2000),
 	deepSeek: {
-		apiKey: process.env.DEEPSEEK_API_KEY || '',
+		apiKey: process.env.DEEPSEEK_API_KEY || process.env.DEEPSEEK_KEY || process.env.DEEPSEEK_TOKEN || '',
 		apiUrl: process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions',
 		model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
 	},

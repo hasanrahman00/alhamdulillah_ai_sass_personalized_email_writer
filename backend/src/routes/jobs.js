@@ -2,7 +2,7 @@ const fs = require('fs');
 
 const express = require('express');
 const csvParser = require('csv-parser');
-const { Parser } = require('json2csv');
+const { Parser } = require('@json2csv/plainjs');
 const { z } = require('zod');
 
 const { asyncHandler } = require('../util/async-handler');
