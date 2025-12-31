@@ -1,7 +1,16 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
-import { UploadCloud, FileText, RefreshCw, Wand2 } from 'lucide-react';
+import { UploadCloud, FileText, RefreshCw, Wand2, Download } from 'lucide-react';
+
+type BulkJobStatus = 'queued' | 'running' | 'paused' | 'completed' | 'failed';
+type BulkJob = {
+  id: number;
+  status: BulkJobStatus | string;
+  total_rows?: number;
+  processed_rows?: number;
+  error_count?: number;
+};
 
 type ToneType =
   | 'Professional/Respectful/Formal'
@@ -130,6 +139,30 @@ export function BulkCopyWriter() {
   const [submitError, setSubmitError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [jobs, setJobs] = useState<BulkJob[]>([]);
+  const pollIntervalRef = useRef<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const res = await fetch('/api/jobs');
+        const json = await res.json().catch(() => null);
+        if (!res.ok) return;
+        const list = Array.isArray(json?.jobs) ? (json.jobs as BulkJob[]) : [];
+        if (cancelled) return;
+        setJobs(list);
+      } catch {
+        // Best-effort load.
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
 
   const selectedTone = useMemo(
     () => (formData.tone ? TONE_GUIDE.find(t => t.name === formData.tone) : undefined),
@@ -137,6 +170,64 @@ export function BulkCopyWriter() {
   );
   const selectedToneBestFor = formData.tone ? getToneBestFor(formData.tone as ToneType) : '';
   const selectedToneServiceFit = formData.tone ? getToneServiceFit(formData.tone as ToneType) : '';
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const isTerminal = (status: unknown) => {
+      const s = String(status || '').toLowerCase();
+      return s === 'completed' || s === 'failed';
+    };
+
+    const hasActiveJobs = jobs.some((j) => j?.id && !isTerminal(j.status));
+    if (!hasActiveJobs) {
+      if (pollIntervalRef.current) {
+        window.clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      return;
+    }
+
+    const poll = async () => {
+      const active = jobs.filter((j) => j?.id && !isTerminal(j.status));
+      if (!active.length) return;
+
+      try {
+        const results = await Promise.all(
+          active.map(async (j) => {
+            const res = await fetch(`/api/jobs/${j.id}`);
+            const json = await res.json().catch(() => null);
+            if (!res.ok) return null;
+            return json?.job as BulkJob | null;
+          })
+        );
+
+        if (cancelled) return;
+        const byId = new Map<number, BulkJob>();
+        for (const job of results) {
+          if (job?.id) byId.set(job.id, job);
+        }
+        if (!byId.size) return;
+
+        setJobs((prev) => prev.map((j) => (j?.id && byId.has(j.id) ? (byId.get(j.id) as BulkJob) : j)));
+      } catch {
+        // Best-effort polling; ignore transient failures.
+      }
+    };
+
+    poll();
+    if (!pollIntervalRef.current) {
+      pollIntervalRef.current = window.setInterval(poll, 1500);
+    }
+
+    return () => {
+      cancelled = true;
+      if (pollIntervalRef.current) {
+        window.clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, [jobs]);
 
   const isCustomLengthValid = formData.length !== 'Custom' || (!isBlank(formData.customLength) && Number(formData.customLength) > 0);
   const validation = {
@@ -220,7 +311,18 @@ export function BulkCopyWriter() {
       const startRes = await fetch('/api/jobs/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileId }),
+        body: JSON.stringify({
+          fileId,
+          valueProp: formData.valueProp,
+          callToAction: formData.callToAction,
+          subject: formData.subject,
+          followUpCount: formData.followUpCount,
+          followUpPrompts: formData.followUpPrompts,
+          tone: formData.tone,
+          length: formData.length,
+          customLength: formData.customLength,
+          instructions: formData.instructions,
+        }),
       });
 
       const startJson = await startRes.json().catch(() => null);
@@ -230,11 +332,71 @@ export function BulkCopyWriter() {
         return;
       }
 
+      const job = startJson?.job;
+      if (job?.id) {
+        setJobs((prev) => {
+          const existing = prev.find((j) => j.id === job.id);
+          if (existing) return prev.map((j) => (j.id === job.id ? job : j));
+          return [job, ...prev];
+        });
+      }
       setSuccessMessage('Upload complete. Bulk job started.');
     } catch {
       setSubmitError('Not able to reach the server. Please make sure the backend is running.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const getJobProgress = (job: BulkJob) => {
+    const processed = Number(job.processed_rows ?? 0);
+    const total = Number(job.total_rows ?? 0);
+    const pct = total > 0 ? Math.min(100, Math.max(0, Math.round((processed / total) * 100))) : 0;
+    return { pct, processed, total };
+  };
+
+  const isTerminalStatus = (status: unknown) => {
+    const s = String(status || '').toLowerCase();
+    return s === 'completed' || s === 'failed';
+  };
+
+  const isPausedStatus = (status: unknown) => String(status || '').toLowerCase() === 'paused';
+
+  const updateJobInState = (job: BulkJob) => {
+    if (!job?.id) return;
+    setJobs((prev) => prev.map((j) => (j.id === job.id ? job : j)));
+  };
+
+  const handleStopJob = async (jobId: number) => {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/stop`, { method: 'POST' });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) return;
+      if (json?.job?.id) updateJobInState(json.job);
+    } catch {
+      // Ignore.
+    }
+  };
+
+  const handleResumeJob = async (jobId: number) => {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/resume`, { method: 'POST' });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) return;
+      if (json?.job?.id) updateJobInState(json.job);
+    } catch {
+      // Ignore.
+    }
+  };
+
+  const handleDeleteJob = async (jobId: number) => {
+    if (!window.confirm('Delete this job and its uploaded file? This cannot be undone.')) return;
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+      if (!res.ok) return;
+      setJobs((prev) => prev.filter((j) => j.id !== jobId));
+    } catch {
+      // Ignore.
     }
   };
 
@@ -557,6 +719,98 @@ export function BulkCopyWriter() {
               >
                 Upload / Generate
               </Button>
+            </div>
+          </div>
+
+
+          <div className="mt-6">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-deep-navy">Jobs</div>
+              <div className="text-xs text-warm-gray-light">
+                {jobs.length ? `${jobs.length} total` : 'No jobs yet'}
+              </div>
+            </div>
+
+            <div className="mt-3 space-y-3">
+              {jobs.map((job) => {
+                const progress = getJobProgress(job);
+                const statusUpper = String(job.status || '').toUpperCase();
+                const isDone = isTerminalStatus(job.status);
+                const isPaused = isPausedStatus(job.status);
+
+                return (
+                  <div key={job.id} className="w-full bg-white/70 border border-warm-gray/10 rounded-xl p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-deep-navy">Job #{job.id}</div>
+                      <div
+                        className={`text-xs font-semibold rounded-full px-2 py-0.5 border ${
+                          String(job.status || '').toLowerCase() === 'failed'
+                            ? 'text-red-600 bg-red-50 border-red-100'
+                            : String(job.status || '').toLowerCase() === 'completed'
+                              ? 'text-success-green bg-success-green/10 border-success-green/20'
+                              : 'text-warm-gray bg-white border-warm-gray/10'
+                        }`}
+                      >
+                        Status: {statusUpper}
+                      </div>
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="h-2.5 rounded-full bg-warm-gray/10 overflow-hidden w-full">
+                        <div className="h-full bg-soft-blue transition-all" style={{ width: `${progress.pct}%` }} />
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-xs text-warm-gray-light">
+                        <span>
+                          {progress.processed}/{progress.total || 0} rows
+                          {Number(job.error_count || 0) > 0 ? ` · ${job.error_count} errors` : ''}
+                        </span>
+                        <span>{progress.pct}%</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-end gap-2">
+                      {!isDone && !isPaused && (
+                        <span className="text-xs text-warm-gray-light">Live updating…</span>
+                      )}
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (!job?.id) return;
+                          window.location.href = `/api/jobs/${job.id}/download`;
+                        }}
+                        leftIcon={<Download className="w-4 h-4" />}
+                      >
+                        Download
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (!job?.id) return;
+                          if (isPaused) handleResumeJob(job.id);
+                          else handleStopJob(job.id);
+                        }}
+                      >
+                        {isPaused ? 'Start' : 'Stop'}
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (!job?.id) return;
+                          handleDeleteJob(job.id);
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

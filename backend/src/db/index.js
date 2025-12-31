@@ -56,6 +56,7 @@ async function initDb() {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			user_id INTEGER NOT NULL,
 			file_id INTEGER NOT NULL,
+			settings_json TEXT,
 			status TEXT NOT NULL,
 			total_rows INTEGER NOT NULL DEFAULT 0,
 			processed_rows INTEGER NOT NULL DEFAULT 0,
@@ -88,6 +89,7 @@ async function initDb() {
 			opening_line TEXT,
 			email_body TEXT,
 			cta TEXT,
+			followups_json TEXT,
 			created_at TEXT NOT NULL DEFAULT (datetime('now')),
 			updated_at TEXT NOT NULL DEFAULT (datetime('now')),
 			FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -103,10 +105,19 @@ async function initDb() {
 
 	// Lightweight migrations (SQLite): add new columns if missing.
 	try {
-		const cols = await db.all(`PRAGMA table_info('prospects')`);
-		const names = new Set(cols.map((c) => String(c.name)));
-		if (!names.has('activity_context')) {
+		const prospectCols = await db.all(`PRAGMA table_info('prospects')`);
+		const prospectNames = new Set(prospectCols.map((c) => String(c.name)));
+		if (!prospectNames.has('activity_context')) {
 			await db.exec(`ALTER TABLE prospects ADD COLUMN activity_context TEXT`);
+		}
+		if (!prospectNames.has('followups_json')) {
+			await db.exec(`ALTER TABLE prospects ADD COLUMN followups_json TEXT`);
+		}
+
+		const jobCols = await db.all(`PRAGMA table_info('jobs')`);
+		const jobNames = new Set(jobCols.map((c) => String(c.name)));
+		if (!jobNames.has('settings_json')) {
+			await db.exec(`ALTER TABLE jobs ADD COLUMN settings_json TEXT`);
 		}
 	} catch {
 		// Best-effort: don't block startup if migration check fails.

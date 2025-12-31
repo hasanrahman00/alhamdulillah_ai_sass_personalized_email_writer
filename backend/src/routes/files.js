@@ -120,23 +120,36 @@ function validateRows({ rows, columnMap }) {
 	const fnCol = columnMap.firstName;
 	const lnCol = columnMap.lastName;
 	const companyCol = columnMap.company;
-	// Website / Activity URL and Activity Context are optional per-row.
-	// The requirement is that at least one of these columns exists in the file.
+	const websiteCol = columnMap.website;
+	const activityCol = columnMap.activityContext;
 
 	for (let i = 0; i < rows.length; i++) {
 		const row = rows[i] || {};
 		const firstName = fnCol ? row[fnCol] : '';
 		const lastName = lnCol ? row[lnCol] : '';
 		const company = companyCol ? row[companyCol] : '';
+		const website = websiteCol ? row[websiteCol] : '';
+		const activity = activityCol ? row[activityCol] : '';
 
 		const missingRequired = [];
 		if (isBlank(firstName)) missingRequired.push('First Name');
 		if (isBlank(lastName)) missingRequired.push('Last Name');
 		if (isBlank(company)) missingRequired.push('Company');
-		if (missingRequired.length) {
+
+		let hasContext = true;
+		if (websiteCol && activityCol) {
+			hasContext = !isBlank(website) || !isBlank(activity);
+		} else if (websiteCol) {
+			hasContext = !isBlank(website);
+		} else if (activityCol) {
+			hasContext = !isBlank(activity);
+		}
+
+		if (missingRequired.length || !hasContext) {
 			errors.push({
 				rowIndex: i + 2, // +1 header +1 1-based
 				missingRequired,
+				missingContext: !hasContext,
 			});
 			if (errors.length >= 5) break;
 		}
@@ -254,6 +267,9 @@ filesRouter.post(
 			const details = [];
 			if (first.missingRequired && first.missingRequired.length) {
 				details.push(`missing required values: ${first.missingRequired.join(', ')}`);
+			}
+			if (first.missingContext) {
+				details.push('must include either Website / Activity URL OR Activity Context');
 			}
 			throw new HttpError(
 				400,

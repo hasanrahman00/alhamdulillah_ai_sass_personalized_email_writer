@@ -22,18 +22,75 @@ function withHttps(url) {
 	return `https://${raw}`;
 }
 
+function normalizeHttpUrlPreservePath(rawUrl) {
+	const raw = String(rawUrl || '').trim();
+	if (!raw) return '';
+	if (/^(mailto:|tel:|javascript:|data:)/i.test(raw)) return '';
+	const candidate = withHttps(raw);
+	try {
+		const u = new URL(candidate);
+		if (!(u.protocol === 'http:' || u.protocol === 'https:')) return '';
+		return u.toString();
+	} catch {
+		return '';
+	}
+}
+
+function isBlank(v) {
+	return String(v || '').trim().length === 0;
+}
+
+function parseFollowUpCount(value) {
+	const n = Number(String(value ?? '').trim() || 0);
+	if (!Number.isFinite(n) || n < 0) throw new HttpError(400, 'Follow-up count must be a number >= 0', { expose: true });
+	return Math.min(10, Math.floor(n));
+}
+
 jobsRouter.post(
 	'/start',
 	asyncHandler(async (req, res) => {
-		const schema = z.object({ fileId: z.number().int().positive() });
-		const { fileId } = schema.parse(req.body);
+		const schema = z
+			.object({
+				fileId: z.number().int().positive(),
+				valueProp: z.string().default(''),
+				callToAction: z.string().default(''),
+				subject: z.string().default(''),
+				followUpCount: z.union([z.string(), z.number()]).optional(),
+				followUpPrompts: z.string().default(''),
+				tone: z.string().default(''),
+				length: z.string().default(''),
+				customLength: z.union([z.string(), z.number()]).optional(),
+				instructions: z.string().default(''),
+			})
+			.strict();
+		const data = schema.parse(req.body || {});
+		const fileId = data.fileId;
+
+		// Minimal validation (frontend already enforces these).
+		if (isBlank(data.valueProp)) throw new HttpError(400, 'Offer summary is required', { expose: true });
+		if (isBlank(data.callToAction)) throw new HttpError(400, 'Call to action is required', { expose: true });
+		if (isBlank(data.tone)) throw new HttpError(400, 'Tone is required', { expose: true });
+		if (isBlank(data.length)) throw new HttpError(400, 'Copy length is required', { expose: true });
+
+		const followUpCount = parseFollowUpCount(data.followUpCount);
+		const settings = {
+			valueProp: String(data.valueProp || '').trim(),
+			callToAction: String(data.callToAction || '').trim(),
+			subject: String(data.subject || '').trim(),
+			followUpCount,
+			followUpPrompts: String(data.followUpPrompts || '').trim(),
+			tone: String(data.tone || '').trim(),
+			length: String(data.length || '').trim(),
+			customLength: String(data.customLength ?? '').trim(),
+			instructions: String(data.instructions || '').trim(),
+		};
 
 		const db = await getDb();
 		const file = await db.get('SELECT * FROM files WHERE id = ? AND user_id = ?', fileId, DEFAULT_USER_ID);
 		if (!file) throw new HttpError(404, 'File not found');
 
 		const existing = await db.get(
-			"SELECT * FROM jobs WHERE file_id = ? AND user_id = ? AND status IN ('queued','running','completed') ORDER BY id DESC LIMIT 1",
+			"SELECT * FROM jobs WHERE file_id = ? AND user_id = ? AND status IN ('queued','running','paused','completed') ORDER BY id DESC LIMIT 1",
 			fileId,
 			DEFAULT_USER_ID
 		);
@@ -44,9 +101,10 @@ jobsRouter.post(
 		const columnMap = JSON.parse(file.column_map_json);
 
 		const jobInsert = await db.run(
-			"INSERT INTO jobs (user_id, file_id, status, total_rows, processed_rows, error_count, started_at) VALUES (?, ?, 'queued', 0, 0, 0, NULL)",
+			"INSERT INTO jobs (user_id, file_id, settings_json, status, total_rows, processed_rows, error_count, started_at) VALUES (?, ?, ?, 'queued', 0, 0, 0, NULL)",
 			DEFAULT_USER_ID,
-			fileId
+			fileId,
+			JSON.stringify(settings)
 		);
 		const jobId = jobInsert.lastID;
 
@@ -63,10 +121,9 @@ jobsRouter.post(
 						const lastName = columnMap.lastName ? row[columnMap.lastName] : '';
 						const email = columnMap.email ? row[columnMap.email] : '';
 						const company = columnMap.company ? row[columnMap.company] : '';
-						const websiteRaw = columnMap.website ? withHttps(row[columnMap.website]) : '';
+						const websiteRaw = columnMap.website ? row[columnMap.website] : '';
 						const activityContext = columnMap.activityContext ? row[columnMap.activityContext] : '';
-						const normalized = normalizeWebsiteInput(websiteRaw);
-						const website = normalized.ok ? normalized.homepageUrl : '';
+						const website = normalizeHttpUrlPreservePath(websiteRaw);
 						const ourServices = columnMap.ourServices ? row[columnMap.ourServices] : '';
 
 						await db.run(
@@ -74,7 +131,7 @@ jobsRouter.post(
 								user_id, file_id, job_id, row_index, status,
 								first_name, last_name, email, company, website, activity_context, our_services,
 								original_row_json
-							) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)` ,
+							) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)` ,
 							DEFAULT_USER_ID,
 							fileId,
 							jobId,
@@ -109,6 +166,12 @@ jobsRouter.post(
 			throw err;
 		}
 
+		// Ensure total_rows is accurate based on what was actually inserted (excludes header).
+		// This prevents UI progress from showing an incorrect total when CSV parsing skips blank/invalid lines.
+		const counted = await db.get('SELECT COUNT(1) AS c FROM prospects WHERE job_id = ?', jobId);
+		const totalRows = Number(counted?.c || 0);
+		await db.run('UPDATE jobs SET total_rows = ? WHERE id = ?', totalRows, jobId);
+
 		await enqueueJob(jobId);
 		const job = await db.get('SELECT * FROM jobs WHERE id = ?', jobId);
 		res.json({ job, reused: false });
@@ -135,6 +198,82 @@ jobsRouter.get(
 		const job = await db.get('SELECT * FROM jobs WHERE id = ? AND user_id = ?', jobId, DEFAULT_USER_ID);
 		if (!job) throw new HttpError(404, 'Job not found');
 		res.json({ job });
+	})
+);
+
+jobsRouter.post(
+	'/:jobId/stop',
+	asyncHandler(async (req, res) => {
+		const jobId = Number(req.params.jobId);
+		const db = await getDb();
+		const job = await db.get('SELECT * FROM jobs WHERE id = ? AND user_id = ?', jobId, DEFAULT_USER_ID);
+		if (!job) throw new HttpError(404, 'Job not found');
+
+		await db.run(
+			"UPDATE jobs SET status='paused' WHERE id = ? AND user_id = ? AND status IN ('queued','running','paused')",
+			jobId,
+			DEFAULT_USER_ID
+		);
+		const updated = await db.get('SELECT * FROM jobs WHERE id = ? AND user_id = ?', jobId, DEFAULT_USER_ID);
+		res.json({ job: updated });
+	})
+);
+
+jobsRouter.post(
+	'/:jobId/resume',
+	asyncHandler(async (req, res) => {
+		const jobId = Number(req.params.jobId);
+		const db = await getDb();
+		const job = await db.get('SELECT * FROM jobs WHERE id = ? AND user_id = ?', jobId, DEFAULT_USER_ID);
+		if (!job) throw new HttpError(404, 'Job not found');
+		if (String(job.status || '') === 'completed') {
+			return res.json({ job });
+		}
+
+		await db.run(
+			"UPDATE jobs SET status='running', started_at=COALESCE(started_at, datetime('now')) WHERE id = ? AND user_id = ?",
+			jobId,
+			DEFAULT_USER_ID
+		);
+		await enqueueJob(jobId);
+		const updated = await db.get('SELECT * FROM jobs WHERE id = ? AND user_id = ?', jobId, DEFAULT_USER_ID);
+		res.json({ job: updated });
+	})
+);
+
+jobsRouter.delete(
+	'/:jobId',
+	asyncHandler(async (req, res) => {
+		const jobId = Number(req.params.jobId);
+		const db = await getDb();
+		const job = await db.get('SELECT * FROM jobs WHERE id = ? AND user_id = ?', jobId, DEFAULT_USER_ID);
+		if (!job) throw new HttpError(404, 'Job not found');
+
+		const file = await db.get('SELECT * FROM files WHERE id = ? AND user_id = ?', job.file_id, DEFAULT_USER_ID);
+
+		await db.exec('BEGIN');
+		try {
+			await db.run('DELETE FROM prospects WHERE job_id = ?', jobId);
+			await db.run('DELETE FROM jobs WHERE id = ? AND user_id = ?', jobId, DEFAULT_USER_ID);
+			if (file) {
+				await db.run('DELETE FROM prospects WHERE file_id = ?', file.id);
+				await db.run('DELETE FROM files WHERE id = ? AND user_id = ?', file.id, DEFAULT_USER_ID);
+			}
+			await db.exec('COMMIT');
+		} catch (err) {
+			await db.exec('ROLLBACK');
+			throw err;
+		}
+
+		if (file?.stored_path) {
+			try {
+				if (fs.existsSync(file.stored_path)) fs.unlinkSync(file.stored_path);
+			} catch {
+				// Best-effort file cleanup.
+			}
+		}
+
+		res.json({ ok: true });
 	})
 );
 
@@ -176,7 +315,7 @@ jobsRouter.get(
 		if (!file) throw new HttpError(404, 'File not found');
 
 		const outputs = await db.all(
-			'SELECT row_index, first_name, subject, opening_line, email_body, cta FROM prospects WHERE job_id = ? ORDER BY row_index ASC',
+			'SELECT row_index, first_name, subject, opening_line, email_body, cta, followups_json FROM prospects WHERE job_id = ? ORDER BY row_index ASC',
 			jobId
 		);
 		const map = new Map(outputs.map((r) => [r.row_index, r]));
@@ -194,15 +333,30 @@ jobsRouter.get(
 
 		function buildFullEmail(out) {
 			if (!out) return '';
-			const opening = ensureNamePrefix(out.opening_line, out.first_name);
-			const parts = [opening, out.email_body, out.cta]
-				.map((s) => String(s || '').trim())
-				.filter(Boolean);
+			const openingLine = String(out.opening_line || '').trim();
+			const cta = String(out.cta || '').trim();
+			const emailBody = String(out.email_body || '').trim();
+			// If the worker stored a full email body (template-based bulk), return it directly.
+			if (isBlank(openingLine) && isBlank(cta)) return emailBody;
+
+			const opening = ensureNamePrefix(openingLine, out.first_name);
+			const parts = [opening, emailBody, cta].map((s) => String(s || '').trim()).filter(Boolean);
 			return parts.join('\n\n');
 		}
 
 		const originalHeaders = JSON.parse(file.header_json);
-		const extraCols = ['subject', 'opening_line', 'email_body', 'cta'];
+		let followUpCount = 0;
+		try {
+			const settings = job.settings_json ? JSON.parse(job.settings_json) : null;
+			followUpCount = parseFollowUpCount(settings?.followUpCount);
+		} catch {
+			followUpCount = 0;
+		}
+
+		const extraCols = ['subject', 'email_body'];
+		for (let i = 1; i <= followUpCount; i++) {
+			extraCols.push(`followup_${i}_subject`, `followup_${i}_email_body`);
+		}
 		const fields = Array.from(new Set([...originalHeaders, ...extraCols]));
 
 		const rows = [];
@@ -213,12 +367,25 @@ jobsRouter.get(
 				.on('data', (row) => {
 					const out = map.get(idx);
 					idx++;
+					let followUps = [];
+					try {
+						followUps = out?.followups_json ? JSON.parse(out.followups_json) : [];
+					} catch {
+						followUps = [];
+					}
+
+					const followUpCols = {};
+					for (let i = 1; i <= followUpCount; i++) {
+						const fu = followUps?.[i - 1] || {};
+						followUpCols[`followup_${i}_subject`] = String(fu?.subject || '').trim();
+						followUpCols[`followup_${i}_email_body`] = String(fu?.email || '').trim();
+					}
+
 					rows.push({
 						...row,
 						subject: out?.subject || '',
-						opening_line: out?.opening_line || '',
 						email_body: buildFullEmail(out),
-						cta: out?.cta || '',
+						...followUpCols,
 					});
 				})
 				.on('error', (err) => reject(err))

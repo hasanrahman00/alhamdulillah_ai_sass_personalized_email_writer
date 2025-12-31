@@ -1,9 +1,10 @@
 const { chromium } = require('playwright');
-const { fetch } = require('undici');
+const { fetch, ProxyAgent } = require('undici');
 const PQueue = require('p-queue').default;
 
 const { config } = require('../config');
 const { HttpError } = require('../util/http-error');
+const { buildSessionId, buildProxyUrlForSession, toPlaywrightProxy } = require('./scrapeProxy');
 
 let browserPromise;
 let scrapeQueue;
@@ -56,9 +57,11 @@ function extractTextFromHtml(html) {
 	return cleanText(cleaned);
 }
 
-async function scrapeUrlRawHttpFallback(url) {
+async function scrapeUrlRawHttpFallback(url, proxyUrl) {
+	const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
 	const res = await fetch(url, {
 		redirect: 'follow',
+		dispatcher,
 		headers: {
 			'user-agent':
 				'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
@@ -166,17 +169,25 @@ function ensureHttpUrl(rawUrl) {
 
 async function scrapeUrlRaw(userProvidedUrl) {
 	const url = ensureHttpUrl(userProvidedUrl);
+	const shouldUseProxy = Boolean(config.scrapeProxyUrl);
+	const rotationMinutes = Number(config.scrapeProxyRotationMinutes) || 5;
+	const maxRetries = Math.max(0, Number(config.scrapeProxyMaxRetries) || 0);
 
 	// IMPORTANT: Scraping is resource-heavy (CPU/RAM/network). Do not run unbounded parallel navigations.
 	// Use a queue so the API can handle high user concurrency without crashing the host.
 	return getScrapeQueue().add(async () => {
+		async function runOnce(attempt) {
+			const sessionId = buildSessionId('url', url, rotationMinutes, attempt);
+			const proxyUrl = shouldUseProxy ? buildProxyUrlForSession(config.scrapeProxyUrl, sessionId) : '';
+			const proxy = proxyUrl ? toPlaywrightProxy(proxyUrl) : null;
 
-		const browser = await getBrowser();
-		const context = await browser.newContext({
-			userAgent:
-				'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-			ignoreHTTPSErrors: true,
-		});
+			const browser = await getBrowser();
+			const context = await browser.newContext({
+				userAgent:
+					'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+				ignoreHTTPSErrors: true,
+				proxy: proxy || undefined,
+			});
 
 		// Reduce bandwidth/cost.
 		await context.route('**/*', (route) => {
@@ -185,73 +196,95 @@ async function scrapeUrlRaw(userProvidedUrl) {
 			return route.continue();
 		});
 
-		const page = await context.newPage();
-		page.setDefaultTimeout(config.scrapeTimeoutMs);
+			const page = await context.newPage();
+			page.setDefaultTimeout(config.scrapeTimeoutMs);
 
-		try {
-			await page.goto(url, { waitUntil: 'domcontentloaded' });
-			await page.waitForLoadState('networkidle').catch(() => null);
-
-		const extracted = await extractFromPage(page);
-
-		const parts = [];
-		if (extracted.title) parts.push(`Title: ${extracted.title}`);
-		if (extracted.metaDescription) parts.push(`Meta: ${extracted.metaDescription}`);
-		if (extracted.headings.length) parts.push(`Headings: ${extracted.headings.join(' | ')}`);
-		if (extracted.bodyText) parts.push(`Page Text:\n${extracted.bodyText}`);
-
-		const combined = cap(parts.join('\n\n'), config.maxScrapedChars);
-		const compact = combined.replace(/\s+/g, ' ').trim();
-
-		// If extraction is too thin (blocked/login/empty), treat as failure.
-		if (!compact || compact.length < 160) {
-			throw new HttpError(422, 'Not able to read the URL content for personalization. Please paste the Activity Text / Context instead.', {
-				expose: true,
-			});
-		}
-
-			if (config.logActivityContext) {
-				// eslint-disable-next-line no-console
-				console.log(
-					[
-						'\n================ SCRAPED ACTIVITY CONTEXT (URL) ================',
-						`URL: ${url}`,
-						capForLog(combined),
-						'================ END SCRAPED ACTIVITY CONTEXT =================\n',
-					].join('\n')
-				);
-			}
-			return combined;
-		} catch (err) {
-			if (err instanceof HttpError) throw err;
-
-		const cause = err && typeof err === 'object'
-			? {
-				name: String(err.name || 'Error'),
-				message: String(err.message || ''),
-			}
-			: { name: 'Error', message: String(err || '') };
-
-			// eslint-disable-next-line no-console
-			console.error('scrapeUrlRaw failed', { url, cause });
-
-			// Fallback: try plain HTTP fetch + HTML text extraction.
 			try {
-				const fallback = await scrapeUrlRawHttpFallback(url);
-				// eslint-disable-next-line no-console
-				console.log('scrapeUrlRaw fallback succeeded', { url });
-				return fallback;
-			} catch (fallbackErr) {
-				if (fallbackErr instanceof HttpError) throw fallbackErr;
-				throw new HttpError(422, 'Not able to open the URL or extract content.', {
-					expose: true,
-					details: { url, cause },
-				});
+				await page.goto(url, { waitUntil: 'domcontentloaded' });
+				await page.waitForLoadState('networkidle').catch(() => null);
+
+				const extracted = await extractFromPage(page);
+
+				const parts = [];
+				if (extracted.title) parts.push(`Title: ${extracted.title}`);
+				if (extracted.metaDescription) parts.push(`Meta: ${extracted.metaDescription}`);
+				if (extracted.headings.length) parts.push(`Headings: ${extracted.headings.join(' | ')}`);
+				if (extracted.bodyText) parts.push(`Page Text:\n${extracted.bodyText}`);
+
+				const combined = cap(parts.join('\n\n'), config.maxScrapedChars);
+				const compact = combined.replace(/\s+/g, ' ').trim();
+
+				// If extraction is too thin (blocked/login/empty), treat as failure.
+				if (!compact || compact.length < 160) {
+					throw new HttpError(422, 'Not able to read the URL content for personalization. Please paste the Activity Text / Context instead.', {
+						expose: true,
+					});
+				}
+
+				if (config.logActivityContext) {
+					// eslint-disable-next-line no-console
+					console.log(
+						[
+							'\n================ SCRAPED ACTIVITY CONTEXT (URL) ================',
+							`URL: ${url}`,
+							capForLog(combined),
+							'================ END SCRAPED ACTIVITY CONTEXT =================\n',
+						].join('\n')
+					);
+				}
+				return { ok: true, value: combined };
+			} catch (err) {
+				return { ok: false, err };
+			} finally {
+				await page.close().catch(() => null);
+				await context.close().catch(() => null);
 			}
-		} finally {
-			await page.close().catch(() => null);
-			await context.close().catch(() => null);
 		}
+
+		for (let attempt = 0; attempt <= maxRetries; attempt++) {
+			const res = await runOnce(attempt);
+			if (res.ok) return res.value;
+
+			const err = res.err;
+			if (err instanceof HttpError) {
+				// Only retry proxy-using scrapes for likely-block/timeout/thin-content cases.
+				if (!shouldUseProxy) throw err;
+				if (attempt >= maxRetries) throw err;
+				if (Number(err.statusCode || err.status) === 400) throw err;
+				continue;
+			}
+
+			// Non-HttpError: could be proxy/network/playwright errors.
+			if (!shouldUseProxy || attempt >= maxRetries) {
+				const cause = err && typeof err === 'object'
+					? {
+						name: String(err.name || 'Error'),
+						message: String(err.message || ''),
+					}
+					: { name: 'Error', message: String(err || '') };
+
+				// eslint-disable-next-line no-console
+				console.error('scrapeUrlRaw failed', { url, cause });
+
+				// Fallback: try plain HTTP fetch + HTML text extraction (also through proxy when configured).
+				const sessionId = buildSessionId('url_http', url, rotationMinutes, 0);
+				const proxyUrl = shouldUseProxy ? buildProxyUrlForSession(config.scrapeProxyUrl, sessionId) : '';
+				try {
+					const fallback = await scrapeUrlRawHttpFallback(url, proxyUrl);
+					// eslint-disable-next-line no-console
+					console.log('scrapeUrlRaw fallback succeeded', { url });
+					return fallback;
+				} catch (fallbackErr) {
+					if (fallbackErr instanceof HttpError) throw fallbackErr;
+					throw new HttpError(422, 'Not able to open the URL or extract content.', {
+						expose: true,
+						details: { url, cause },
+					});
+				}
+			}
+		}
+
+		throw new HttpError(422, 'Not able to open the URL or extract content.', { expose: true });
 	});
 }
 
