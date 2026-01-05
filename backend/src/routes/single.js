@@ -125,6 +125,10 @@ function parseEmails(text) {
 	return emails;
 }
 
+function htmlBreaksToNewlines(text) {
+	return String(text || '').replace(/<br\s*\/?>/gi, '\n');
+}
+
 function formatEmails(emails) {
 	const list = Array.isArray(emails) ? emails : [];
 	return list
@@ -143,7 +147,7 @@ function formatEmails(emails) {
 function parseFollowUpCount(value) {
 	const n = Number(String(value ?? '').trim() || 0);
 	if (!Number.isFinite(n) || n < 0) throw new HttpError(400, 'Follow-up count must be a number >= 0', { expose: true });
-	return Math.min(10, Math.floor(n));
+	return Math.min(4, Math.floor(n));
 }
 
 function isHttpUrl(value) {
@@ -276,6 +280,9 @@ singleRouter.post(
 
 		const aiText = await callDeepSeekText({ prompt, requestId: 'single_generate' });
 		const emails = parseEmails(aiText);
+		for (const e of emails) {
+			e.email = htmlBreaksToNewlines(e.email);
+		}
 		const parsed = emails.length ? emails[0] : parseSubjectAndBody(aiText);
 		const formattedText = emails.length
 			? formatEmails(emails)
@@ -288,7 +295,7 @@ singleRouter.post(
 			]);
 
 		const subject = String(parsed.subject || '').trim() || String(data.subject || '').trim();
-		const email = String(parsed.email || '').trim();
+		const email = htmlBreaksToNewlines(String(parsed.email || '').trim());
 		if (isBlank(email)) {
 			throw new HttpError(502, 'AI returned an empty email body. Please try again.', { expose: true });
 		}
