@@ -84,7 +84,10 @@ const COLD_EMAIL_BULK_PROMPT_WITH_FOLLOW_UP_TEMPLATE = [
 	'Language & clarity rules:',
 	'- Use plain English; avoid jargon and complex sentences.',
 	'- Keep paragraphs and sentences short; avoid exclamation marks.',
-	'- No emojis. No ALL CAPS. Avoid spam trigger words and phrases that create urgency (“urgent”, “limited time”), seem shady (“secret”, “risk-free”), overpromise outcomes (“guaranteed success”, “double your revenue”) or sound unnatural. The copy should feel honest and realistic.',
+	'- No emojis. No ALL CAPS. Avoid excessive punctuation (!!!, ???, ………) and salesy formatting.',
+	'- Avoid spam-trigger words and phrases that create urgency (“urgent”, “limited time”), seem shady (“secret”, “risk-free”), overpromise outcomes (“guaranteed success”, “double your revenue”), or feel overly promotional. The copy should feel honest, realistic, and human.',
+	'- Value-first requirement: every email must give the reader a clear reason to care (a relevant insight, observation, or helpful suggestion) — not just a pitch.',
+	'- Cold outreach may still be flagged as spam if it’s unsolicited or promotional; follow anti-spam laws (e.g., CAN-SPAM) and best practices (truthful subject lines, no deceptive claims, no misleading familiarity).',
 	'- Do not hallucinate facts; base all references on the provided context.',
 	'',
 

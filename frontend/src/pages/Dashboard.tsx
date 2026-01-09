@@ -1,7 +1,7 @@
 import React from 'react';
 import { MetricsCard } from '../components/MetricsCard';
 import { RecentActivity } from '../components/RecentActivity';
-import { PenTool, CheckCircle2, Flame, Calendar } from 'lucide-react';
+import { PenTool, CheckCircle2, Flame } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 export function Dashboard() {
   const navigate = useNavigate();

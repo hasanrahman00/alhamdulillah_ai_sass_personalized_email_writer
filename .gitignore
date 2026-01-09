@@ -22,3 +22,7 @@ Thumbs.db
 # local databases / uploads
 backend/data/
 backend/uploads/
+
+# local sitemap artifacts
+lemlist_sitemap-*.xml
+lemlist_www_sitemap-*.xml

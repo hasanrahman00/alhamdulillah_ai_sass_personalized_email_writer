@@ -1,6 +1,6 @@
 import React from 'react';
 import { Card } from './ui/Card';
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { TrendingUp, TrendingDown } from 'lucide-react';
 interface MetricsCardProps {
   title: string;
   value: string;

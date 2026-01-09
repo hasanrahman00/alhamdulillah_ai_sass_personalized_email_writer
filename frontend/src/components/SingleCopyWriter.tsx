@@ -268,8 +268,14 @@ export function SingleCopyWriter() {
       }
       const emails = Array.isArray(data?.emails) ? data.emails : [];
       if (emails.length) {
+        type EmailItem = {
+          type?: unknown;
+          subject?: unknown;
+          email?: unknown;
+        };
+
         const formatted = emails
-          .map((e: any, idx: number) => {
+          .map((e: EmailItem, idx: number) => {
             const t = String(e?.type || '').trim();
             const s = String(e?.subject || '').trim();
             const b = String(e?.email || '').trim();
