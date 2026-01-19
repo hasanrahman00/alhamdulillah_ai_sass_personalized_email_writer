@@ -1,0 +1,109 @@
+name: Deploy Backend to VPS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-backend-vps.yml"
+
+concurrency:
+  group: deploy-backend-vps
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Deploy backend
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+
+          VPS_APP_DIR: ${{ vars.VPS_APP_DIR }}
+          DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH }}
+
+          PROCESS_MANAGER: ${{ vars.PROCESS_MANAGER }}
+          PM2_APP_NAME: ${{ vars.PM2_APP_NAME }}
+          SYSTEMD_SERVICE: ${{ vars.SYSTEMD_SERVICE }}
+
+          INSTALL_PLAYWRIGHT: ${{ vars.INSTALL_PLAYWRIGHT }}
+        run: |
+          set -euo pipefail
+
+          : "${VPS_HOST:?Missing VPS_HOST secret}"
+          : "${VPS_USER:?Missing VPS_USER secret}"
+          : "${VPS_SSH_AUTH_SOCK:?ssh-agent not initialized}"
+
+          VPS_PORT="${VPS_PORT:-22}"
+          VPS_APP_DIR="${VPS_APP_DIR:-/var/www/alhamdulillah_ai_sass_personalized_email_writer}"
+          DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
+          PROCESS_MANAGER="${PROCESS_MANAGER:-pm2}"
+          INSTALL_PLAYWRIGHT="${INSTALL_PLAYWRIGHT:-0}"
+
+          echo "Deploying branch '$DEPLOY_BRANCH' to $VPS_USER@$VPS_HOST:$VPS_APP_DIR (port $VPS_PORT)"
+
+          ssh -p "$VPS_PORT" -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" 'bash -s' <<'EOF'
+          set -euo pipefail
+
+          VPS_APP_DIR="${VPS_APP_DIR:-/var/www/alhamdulillah_ai_sass_personalized_email_writer}"
+          DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
+          PROCESS_MANAGER="${PROCESS_MANAGER:-pm2}"
+          PM2_APP_NAME="${PM2_APP_NAME:-}"
+          SYSTEMD_SERVICE="${SYSTEMD_SERVICE:-}"
+          INSTALL_PLAYWRIGHT="${INSTALL_PLAYWRIGHT:-0}"
+
+          if [ ! -d "$VPS_APP_DIR/.git" ]; then
+            echo "ERROR: VPS_APP_DIR does not look like a git repo: $VPS_APP_DIR" >&2
+            exit 1
+          fi
+
+          cd "$VPS_APP_DIR"
+          git fetch origin "$DEPLOY_BRANCH"
+          git checkout "$DEPLOY_BRANCH"
+          git reset --hard "origin/$DEPLOY_BRANCH"
+
+          cd backend
+          npm ci --omit=dev
+
+          if [ "$INSTALL_PLAYWRIGHT" = "1" ]; then
+            # Only needed if the VPS doesn't already have Playwright browsers.
+            npx playwright install --with-deps chromium
+          fi
+
+          if [ "$PROCESS_MANAGER" = "systemd" ]; then
+            if [ -z "$SYSTEMD_SERVICE" ]; then
+              echo "ERROR: SYSTEMD_SERVICE is required when PROCESS_MANAGER=systemd" >&2
+              exit 1
+            fi
+            sudo systemctl restart "$SYSTEMD_SERVICE"
+            sudo systemctl status "$SYSTEMD_SERVICE" --no-pager -l || true
+          else
+            # Default: pm2
+            if [ -z "$PM2_APP_NAME" ]; then
+              echo "ERROR: PM2_APP_NAME is required when PROCESS_MANAGER=pm2" >&2
+              exit 1
+            fi
+
+            if pm2 describe "$PM2_APP_NAME" >/dev/null 2>&1; then
+              pm2 reload "$PM2_APP_NAME" --update-env
+            else
+              # Starts "npm start" in backend/
+              pm2 start npm --name "$PM2_APP_NAME" -- start
+            fi
+            pm2 save
+            pm2 status
+          fi
+
+          echo "Deploy complete."
+          EOF
