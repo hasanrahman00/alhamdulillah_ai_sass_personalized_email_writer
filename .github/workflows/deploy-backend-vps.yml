@@ -6,6 +6,7 @@ on:
     paths:
       - "backend/**"
       - ".github/workflows/deploy-backend-vps.yml"
+  workflow_dispatch:
 
 concurrency:
   group: deploy-backend-vps
@@ -53,7 +54,8 @@ jobs:
 
           echo "Deploying branch '$DEPLOY_BRANCH' to $VPS_USER@$VPS_HOST:$VPS_APP_DIR (port $VPS_PORT)"
 
-          ssh -p "$VPS_PORT" -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" 'bash -s' <<'EOF'
+          ssh -p "$VPS_PORT" -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" \
+            "VPS_APP_DIR='$VPS_APP_DIR' DEPLOY_BRANCH='$DEPLOY_BRANCH' PROCESS_MANAGER='$PROCESS_MANAGER' PM2_APP_NAME='$PM2_APP_NAME' SYSTEMD_SERVICE='$SYSTEMD_SERVICE' INSTALL_PLAYWRIGHT='$INSTALL_PLAYWRIGHT' bash -s" <<'EOF'
           set -euo pipefail
 
           VPS_APP_DIR="${VPS_APP_DIR:-/var/www/alhamdulillah_ai_sass_personalized_email_writer}"
