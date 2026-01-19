@@ -20,13 +20,52 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate deploy secrets
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          : "${VPS_HOST:?Missing VPS_HOST secret}"
+          : "${VPS_USER:?Missing VPS_USER secret}"
+          VPS_PORT="${VPS_PORT:-22}"
+          : "${VPS_SSH_KEY:?Missing VPS_SSH_KEY secret (must be the PRIVATE key)}"
+          echo "Deploy target: $VPS_USER@$VPS_HOST:$VPS_PORT"
+
+      - name: SSH auth preflight (debug)
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          VPS_PORT="${VPS_PORT:-22}"
+          umask 077
+          printf '%s' "$VPS_SSH_KEY" > ./_deploy_key
+          chmod 600 ./_deploy_key
+
+          # This prints useful info like: "Offering public key" and why it was rejected.
+          ssh -vv -i ./_deploy_key -p "$VPS_PORT" \
+            -o StrictHostKeyChecking=no \
+            -o PreferredAuthentications=publickey \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            "$VPS_USER@$VPS_HOST" "echo 'ssh ok'"
+
       - name: Deploy backend on VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT || 22 }}
+          port: ${{ secrets.VPS_PORT }}
+          passphrase: ${{ secrets.VPS_SSH_KEY_PASSPHRASE }}
+          debug: true
           script_stop: true
           script: |
             set -euo pipefail
