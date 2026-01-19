@@ -15,6 +15,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -31,37 +33,24 @@ jobs:
           set -euo pipefail
           : "${VPS_HOST:?Missing VPS_HOST secret}"
           : "${VPS_USER:?Missing VPS_USER secret}"
-          VPS_PORT="${VPS_PORT:-22}"
           : "${VPS_SSH_KEY:?Missing VPS_SSH_KEY secret (must be the PRIVATE key)}"
+          VPS_PORT="${VPS_PORT:-22}"
           echo "Deploy target: $VPS_USER@$VPS_HOST:$VPS_PORT"
 
-      - name: Prepare SSH key file
-        shell: bash
-        env:
-          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-        run: |
-          set -euo pipefail
-          umask 077
-          # Normalize line endings in case the key was pasted with CRLF.
-          printf '%s' "$VPS_SSH_KEY" | tr -d '\r' > ./_deploy_key
-          chmod 600 ./_deploy_key
-
-          # Sanity check (prints only fingerprint, not the key).
-          echo "SSH private key fingerprint from VPS_SSH_KEY secret:"
-          ssh-keygen -lf ./_deploy_key
-          echo "Wrote SSH key file ./_deploy_key"
-
+      # Optional: keep this while you validate SSH from Actions; remove later if you want faster runs.
       - name: SSH auth preflight (debug)
         shell: bash
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           set -euo pipefail
           VPS_PORT="${VPS_PORT:-22}"
-
-          # This prints useful info like: "Offering public key" and why it was rejected.
+          umask 077
+          printf '%s' "$VPS_SSH_KEY" | tr -d '\r' > ./_deploy_key
+          chmod 600 ./_deploy_key
           ssh -vv -i ./_deploy_key -p "$VPS_PORT" \
             -o StrictHostKeyChecking=no \
             -o PreferredAuthentications=publickey \
@@ -75,8 +64,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           port: ${{ secrets.VPS_PORT }}
-          key_path: ./_deploy_key
-          passphrase: ${{ secrets.VPS_SSH_KEY_PASSPHRASE }}
+          key: ${{ secrets.VPS_SSH_KEY }}
           debug: true
           script_stop: true
           script: |
@@ -88,7 +76,7 @@ jobs:
             PM2_APP_NAME="${{ vars.PM2_APP_NAME }}"
             SYSTEMD_SERVICE="${{ vars.SYSTEMD_SERVICE }}"
             INSTALL_PLAYWRIGHT="${{ vars.INSTALL_PLAYWRIGHT }}"
-            BACKEND_ENV_B64='${{ secrets.BACKEND_ENV_B64 }}'
+            BACKEND_ENV_B64="${{ secrets.BACKEND_ENV_B64 }}"
 
             VPS_APP_DIR="${VPS_APP_DIR:-/var/www/alhamdulillah_ai_sass_personalized_email_writer}"
             DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
@@ -130,11 +118,13 @@ jobs:
                 echo "ERROR: PM2_APP_NAME is required when PROCESS_MANAGER=pm2" >&2
                 exit 1
               fi
+
               if pm2 describe "$PM2_APP_NAME" >/dev/null 2>&1; then
                 pm2 reload "$PM2_APP_NAME" --update-env
               else
                 pm2 start npm --name "$PM2_APP_NAME" -- start
               fi
+
               pm2 save
               pm2 status
             fi
