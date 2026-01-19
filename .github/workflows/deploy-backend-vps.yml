@@ -46,8 +46,9 @@ jobs:
           printf '%s' "$VPS_SSH_KEY" | tr -d '\r' > ./_deploy_key
           chmod 600 ./_deploy_key
 
-          # Quick sanity check (prints only fingerprint, not the key).
-          ssh-keygen -lf ./_deploy_key >/dev/null
+          # Sanity check (prints only fingerprint, not the key).
+          echo "SSH private key fingerprint from VPS_SSH_KEY secret:"
+          ssh-keygen -lf ./_deploy_key
           echo "Wrote SSH key file ./_deploy_key"
 
       - name: SSH auth preflight (debug)
