@@ -22,7 +22,7 @@ function boolEnv(name, fallback = false) {
 const logActivityContext = boolEnv('LOG_ACTIVITY_CONTEXT', false);
 
 const config = {
-	port: numberEnv('PORT', 3001),
+	port: numberEnv('PORT', 3005),
 	corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
 	sqlitePath: process.env.SQLITE_PATH || path.join(__dirname, '..', 'data', 'app.sqlite'),
 	uploadDir: process.env.UPLOAD_DIR || path.join(__dirname, '..', 'uploads'),

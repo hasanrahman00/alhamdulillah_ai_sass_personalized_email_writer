@@ -41,7 +41,7 @@ cd backend
 npm run dev
 ```
 
-Backend runs on `http://localhost:3001`.
+Backend runs on `http://localhost:3005`.
 
 ### 2) Frontend
 
