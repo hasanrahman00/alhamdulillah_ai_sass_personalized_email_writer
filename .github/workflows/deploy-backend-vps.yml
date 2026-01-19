@@ -35,19 +35,30 @@ jobs:
           : "${VPS_SSH_KEY:?Missing VPS_SSH_KEY secret (must be the PRIVATE key)}"
           echo "Deploy target: $VPS_USER@$VPS_HOST:$VPS_PORT"
 
+      - name: Prepare SSH key file
+        shell: bash
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          # Normalize line endings in case the key was pasted with CRLF.
+          printf '%s' "$VPS_SSH_KEY" | tr -d '\r' > ./_deploy_key
+          chmod 600 ./_deploy_key
+
+          # Quick sanity check (prints only fingerprint, not the key).
+          ssh-keygen -lf ./_deploy_key >/dev/null
+          echo "Wrote SSH key file ./_deploy_key"
+
       - name: SSH auth preflight (debug)
         shell: bash
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
-          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           set -euo pipefail
           VPS_PORT="${VPS_PORT:-22}"
-          umask 077
-          printf '%s' "$VPS_SSH_KEY" > ./_deploy_key
-          chmod 600 ./_deploy_key
 
           # This prints useful info like: "Offering public key" and why it was rejected.
           ssh -vv -i ./_deploy_key -p "$VPS_PORT" \
@@ -62,8 +73,8 @@ jobs:
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
+          key_path: ./_deploy_key
           passphrase: ${{ secrets.VPS_SSH_KEY_PASSPHRASE }}
           debug: true
           script_stop: true
