@@ -44,7 +44,7 @@ jobs:
 
           : "${VPS_HOST:?Missing VPS_HOST secret}"
           : "${VPS_USER:?Missing VPS_USER secret}"
-          : "${VPS_SSH_AUTH_SOCK:?ssh-agent not initialized}"
+          : "${SSH_AUTH_SOCK:?ssh-agent not initialized}"
 
           VPS_PORT="${VPS_PORT:-22}"
           VPS_APP_DIR="${VPS_APP_DIR:-/var/www/alhamdulillah_ai_sass_personalized_email_writer}"
