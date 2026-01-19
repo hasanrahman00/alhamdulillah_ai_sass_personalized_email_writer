@@ -86,7 +86,6 @@ async function callDeepSeek({ prompt, requestId }) {
 			const content = data?.choices?.[0]?.message?.content ?? '';
 			const parsed = extractJsonObject(content);
 
-			// best-effort logging
 			const usage = data?.usage;
 			if (usage) {
 				// eslint-disable-next-line no-console
