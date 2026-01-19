@@ -31,6 +31,10 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
 
+          # Optional: base64-encoded backend .env content to write on the VPS.
+          # Create this as a GitHub Actions Secret named BACKEND_ENV_B64.
+          BACKEND_ENV_B64: ${{ secrets.BACKEND_ENV_B64 }}
+
           VPS_APP_DIR: ${{ vars.VPS_APP_DIR }}
           DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH }}
 
@@ -55,7 +59,7 @@ jobs:
           echo "Deploying branch '$DEPLOY_BRANCH' to $VPS_USER@$VPS_HOST:$VPS_APP_DIR (port $VPS_PORT)"
 
           ssh -p "$VPS_PORT" -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" \
-            "VPS_APP_DIR='$VPS_APP_DIR' DEPLOY_BRANCH='$DEPLOY_BRANCH' PROCESS_MANAGER='$PROCESS_MANAGER' PM2_APP_NAME='$PM2_APP_NAME' SYSTEMD_SERVICE='$SYSTEMD_SERVICE' INSTALL_PLAYWRIGHT='$INSTALL_PLAYWRIGHT' bash -s" <<'EOF'
+            "VPS_APP_DIR='$VPS_APP_DIR' DEPLOY_BRANCH='$DEPLOY_BRANCH' PROCESS_MANAGER='$PROCESS_MANAGER' PM2_APP_NAME='$PM2_APP_NAME' SYSTEMD_SERVICE='$SYSTEMD_SERVICE' INSTALL_PLAYWRIGHT='$INSTALL_PLAYWRIGHT' BACKEND_ENV_B64='$BACKEND_ENV_B64' bash -s" <<'EOF'
           set -euo pipefail
 
           VPS_APP_DIR="${VPS_APP_DIR:-/var/www/alhamdulillah_ai_sass_personalized_email_writer}"
@@ -64,6 +68,7 @@ jobs:
           PM2_APP_NAME="${PM2_APP_NAME:-}"
           SYSTEMD_SERVICE="${SYSTEMD_SERVICE:-}"
           INSTALL_PLAYWRIGHT="${INSTALL_PLAYWRIGHT:-0}"
+          BACKEND_ENV_B64="${BACKEND_ENV_B64:-}"
 
           if [ ! -d "$VPS_APP_DIR/.git" ]; then
             echo "ERROR: VPS_APP_DIR does not look like a git repo: $VPS_APP_DIR" >&2
@@ -76,6 +81,12 @@ jobs:
           git reset --hard "origin/$DEPLOY_BRANCH"
 
           cd backend
+
+          if [ -n "$BACKEND_ENV_B64" ]; then
+            umask 077
+            printf '%s' "$BACKEND_ENV_B64" | base64 -d > .env
+          fi
+
           npm ci --omit=dev
 
           if [ "$INSTALL_PLAYWRIGHT" = "1" ]; then
